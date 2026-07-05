@@ -7,7 +7,7 @@
 응답을 출력한다. 서버와 연결을 '유지(persistent)'하며 여러 요청을 보낸다.
 
 [이번 확장] 데이터를 담을 '파일'을 여러 개 다룰 수 있다.
-  → 교수님 조언대로 '기존 파일에 데이터 추가' 와 '새 파일 만들어 담기' 를 모두 지원.
+  → '기존 파일에 데이터 추가' 와 '새 파일 만들어 담기' 를 모두 지원.
   - 파일 관리:  FILES / NEWFILE <이름> / DELFILE <이름> / USE <이름>
   - 데이터 관리(현재 선택된 파일 대상):  GET / POST / PUT / DELETE
 
@@ -32,6 +32,7 @@
 """
 
 import socket
+import re                     # 비표준 공백(전각 스페이스 등) 정규화용
 
 HOST = "127.0.0.1"
 PORT = 8080
@@ -155,6 +156,9 @@ def main():
                 cmd = input(f"\n명령[{current_file}]> ").strip()   # 프롬프트에 현재 파일 표시
             except EOFError:                       # 입력 끝(파이프 종료 등)
                 break
+            # 한글 입력기 등에서 섞여 들어온 '비표준 공백'(전각·무중단·제로폭 등)을
+            # 일반 공백으로 정규화한다. (예: "POST　홍길동..." 의 전각 스페이스 → 일반 스페이스)
+            cmd = re.sub(r"[   -​  　﻿]", " ", cmd).strip()
             if cmd == "":
                 continue
             low = cmd.lower()

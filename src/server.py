@@ -10,9 +10,9 @@ TCP 소켓 위에 HTTP/2.0 프로토콜을 직접 구현한 서버.
 백엔드는 데이터 '파일'들을 간이 데이터베이스처럼 다뤄
 사용자 정보(id, 이름, 전화, 이메일, 학번)를 CRUD 한다.
 
-[이번 확장] 교수님 조언(유연한 CREATE) 반영:
-  "데이터를 기존 파일에 생성하는 방법 / 새 파일을 만들어 생성하는 방법,
-   둘 다 유연하게" → 그래서 '파일 단위 CRUD'를 추가했다.
+[이번 확장] 유연한 CREATE:
+  데이터를 기존 파일에 생성하는 방법 / 새 파일을 만들어 생성하는 방법을
+  둘 다 지원 → '파일 단위 CRUD'를 추가했다.
   (한 파일 = 하나의 사용자 목록/그룹. 예: userdata, friends, classA ...)
 
   ── 파일 단위 (CREATE·DELETE 를 '파일'에도 적용) ──
@@ -82,6 +82,7 @@ STATUS_TEXT = {
 }
 
 
+# [함수] 소켓 스트림에서 HTTP 메시지 1개(헤더+바디)를 정확히 잘라 읽는다.
 def recv_http_message(sock, buffer):
     """소켓에서 HTTP 메시지 1개(헤더+바디)를 읽어 (메시지bytes, 남은buffer) 반환.
     상대가 연결을 닫으면 (None, b'') 를 돌려준다. (지속 연결의 메시지 경계 처리)"""
@@ -112,13 +113,16 @@ def recv_http_message(sock, buffer):
     return header_bytes + b"\r\n\r\n" + body, leftover
 
 
+# [클래스] 데이터 파일 '하나'의 레코드(사용자)를 CRUD 하는 간이 DB.
 class RecordStore:
     """데이터 파일 '하나'를 'id,name,phone,email,studentid' 레코드(한 줄=한 명)로 다루는 간이 DB.
     (예전 UserStore. 이제는 특정 파일 하나에만 묶이지 않고, 경로만 주면 그 파일을 다룬다.)"""
 
+    # 이 스토어가 다룰 데이터 파일 경로를 저장한다.
     def __init__(self, path):
         self.path = path                # 이 스토어가 다루는 데이터 파일 경로
 
+    # 파일을 읽어 레코드(dict) 리스트로 반환한다(파일 없으면 빈 리스트).
     def _read_all(self):
         """파일을 읽어 레코드(dict) 리스트로 반환. 파일이 없으면 빈 리스트."""
         records = []
@@ -135,21 +139,25 @@ class RecordStore:
                 records.append(dict(zip(FIELDS, parts)))
         return records
 
+    # 레코드 리스트를 파일에 통째로 다시 쓴다(수정/삭제 후 저장).
     def _write_all(self, records):
         """레코드 리스트를 파일에 통째로 다시 쓴다(수정/삭제 후 저장)."""
         with open(self.path, "w", encoding="utf-8") as f:
             for r in records:
                 f.write(",".join(r[k] for k in FIELDS) + "\n")
 
+    # 파일의 전체 레코드를 반환한다. (READ - 목록)
     def list_all(self):
         return self._read_all()
 
+    # id로 레코드 한 개를 찾는다(없으면 None). (READ - 단건)
     def find(self, uid):
         for r in self._read_all():
             if r["id"] == uid:
                 return r
         return None
 
+    # 특정 필드(studentid·email 등) 값이 같은 레코드를 찾는다(중복 검사용).
     def find_by_field(self, field, value):
         """특정 필드(studentid·email 등) 값이 같은 레코드를 찾는다. (중복 검사용)"""
         for r in self._read_all():
@@ -157,11 +165,13 @@ class RecordStore:
                 return r
         return None
 
+    # 그 파일에서 다음에 쓸 id(현재 최대 +1)를 만든다.
     def next_id(self):
         """현재 파일에서 가장 큰 id + 1. (파일마다 id는 독립적으로 매겨짐)"""
         ids = [int(r["id"]) for r in self._read_all() if r["id"].isdigit()]
         return str(max(ids) + 1) if ids else "1"
 
+    # 새 레코드를 추가하고 부여된 id를 반환한다. (CREATE)
     def add(self, name, phone, email, studentid):
         uid = self.next_id()
         records = self._read_all()
@@ -170,6 +180,7 @@ class RecordStore:
         self._write_all(records)
         return uid
 
+    # id에 해당하는 레코드를 새 값으로 수정한다. (UPDATE)
     def update(self, uid, name, phone, email, studentid):
         records = self._read_all()
         for r in records:
@@ -179,6 +190,7 @@ class RecordStore:
                 return True
         return False
 
+    # id에 해당하는 레코드를 삭제한다. (DELETE)
     def delete(self, uid):
         records = self._read_all()
         kept = [r for r in records if r["id"] != uid]
@@ -188,12 +200,14 @@ class RecordStore:
         return True
 
 
+# [클래스] data/ 안의 여러 '데이터 파일'을 관리한다(목록·생성·삭제·이름검사).
 class FileManager:
     """DATA_DIR 안의 여러 '데이터 파일'을 관리한다.
     - 파일 = '{이름}.txt'. 한 파일이 하나의 사용자 목록(간이 테이블)이다.
-    - 교수님 조언(유연한 CREATE): 데이터를 '기존 파일에 추가'하거나
+    - 유연한 CREATE: 데이터를 '기존 파일에 추가'하거나
       '새 파일을 만들어' 담을 수 있도록, 파일 자체도 만들고/지울 수 있게 했다."""
 
+    # data/ 폴더를 준비하고, 기본 파일(userdata)이 없으면 시드한다.
     def __init__(self, data_dir):
         self.data_dir = data_dir
         os.makedirs(self.data_dir, exist_ok=True)     # data/ 폴더가 없으면 만든다
@@ -201,15 +215,18 @@ class FileManager:
         if not self.exists(DEFAULT_FILE):
             self._seed_default()
 
+    # 파일 이름 → 실제 경로(data/이름.txt)로 바꾼다.
     def _path(self, name):
         """파일 이름 → 실제 경로. (항상 DATA_DIR 안, 확장자 자동 부착)"""
         return os.path.join(self.data_dir, name + DATA_EXT)
 
+    # 파일 이름이 규칙(영문/숫자/한글/_/- 1~32자)에 맞는지 검사한다(경로 조작 차단).
     @staticmethod
     def valid_name(name):
         """파일 이름이 규칙에 맞는지 검사. (빈 값·경로 문자·너무 김 → False)"""
         return bool(name) and bool(FILENAME_RE.match(name))
 
+    # 기본 파일 userdata.txt 를 시드 3명으로 생성한다.
     def _seed_default(self):
         seed = [
             "1,홍길동,010-1234-1234,test1@kookmin.ac.kr,20210001",
@@ -219,6 +236,7 @@ class FileManager:
         with open(self._path(DEFAULT_FILE), "w", encoding="utf-8") as f:
             f.write("\n".join(seed) + "\n")
 
+    # data/ 안의 데이터 파일 이름 목록(확장자 뗀 이름, 정렬)을 반환한다.
     def list_files(self):
         """DATA_DIR 안 데이터 파일 이름 목록(확장자 뗀 이름, 정렬)."""
         names = []
@@ -227,9 +245,11 @@ class FileManager:
                 names.append(fn[:-len(DATA_EXT)])
         return sorted(names)
 
+    # 그 이름의 데이터 파일이 존재하는지 확인한다.
     def exists(self, name):
         return os.path.isfile(self._path(name))
 
+    # 빈 데이터 파일을 새로 만든다(이미 있으면 False). (파일 CREATE)
     def create_file(self, name):
         """빈 데이터 파일 생성. 성공 True / 이미 있으면 False."""
         if self.exists(name):
@@ -237,6 +257,7 @@ class FileManager:
         open(self._path(name), "w", encoding="utf-8").close()   # 빈 파일 생성
         return True
 
+    # 데이터 파일을 통째로 삭제한다(없으면 False). (파일 DELETE)
     def delete_file(self, name):
         """데이터 파일 통째 삭제. 성공 True / 없으면 False."""
         if not self.exists(name):
@@ -244,14 +265,17 @@ class FileManager:
         os.remove(self._path(name))
         return True
 
+    # 그 파일 하나를 다루는 RecordStore 를 만들어 반환한다.
     def store(self, name):
         """그 파일을 다루는 RecordStore 반환."""
         return RecordStore(self._path(name))
 
 
+# [클래스] 소켓을 열고 HTTP 요청을 받아 처리·응답하는 서버 본체.
 class HTTPServer:
     """소켓을 열고 HTTP 요청을 받아 파일/레코드를 조작한 뒤 응답을 돌려주는 서버."""
 
+    # 파일 관리자·Lock·소켓 등 서버 상태를 초기화한다.
     def __init__(self, host, port):
         self.host = host
         self.port = port
@@ -260,6 +284,7 @@ class HTTPServer:
         self.sock = None
 
     # ---------- 응답 만들기 ----------
+    # 상태라인·헤더·바디를 HTTP 응답 형식(바이트)으로 조립한다.
     def make_response(self, status, body="", extra_headers=None):
         if isinstance(body, str):
             body = body.encode("utf-8")
@@ -278,6 +303,7 @@ class HTTPServer:
         return head + body
 
     # ---------- 메시지 파싱 ----------
+    # 요청 메시지를 요청라인·헤더(dict)·바디로 나눈다.
     def parse_message(self, message):
         header_bytes, _, body = message.partition(b"\r\n\r\n")
         lines = header_bytes.decode("utf-8", "replace").split("\r\n")
@@ -289,6 +315,7 @@ class HTTPServer:
                 headers[key.strip().lower()] = value.strip()
         return request_line, headers, body.decode("utf-8", "replace")
 
+    # 바디를 [이름,전화,이메일,학번] 4개로 파싱한다(구조 틀리면 None → 400).
     def parse_body(self, body):
         """바디 'name,phone,email,studentid' → [4개] / 구조가 틀리면 None.
         (필드 개수·빈 값 같은 '구조' 검사 → 틀리면 400)"""
@@ -297,6 +324,7 @@ class HTTPServer:
             return None
         return parts
 
+    # 필드 값 형식(학번 숫자·이메일 형식 등)을 검사한다(문제면 사유 → 422).
     def validate_fields(self, name, phone, email, studentid):
         """필드 '값'의 형식을 검사한다. 문제 있으면 사유 문자열, 정상이면 None.
         (구조는 맞지만 값이 이상한 경우 → 422 Unprocessable Entity)"""
@@ -309,6 +337,7 @@ class HTTPServer:
         return None
 
     # ---------- 라우팅(메서드 + 경로 → 동작) ----------
+    # 경로 깊이(/files · /files/{f} · /files/{f}/{id})와 메서드로 알맞은 핸들러에 분기한다.
     def route(self, method, path, body):
         segments = [s for s in path.split("/") if s]
         if not segments:
@@ -358,6 +387,7 @@ class HTTPServer:
             ["Allow: GET, PUT, DELETE"])
 
     # ---------- 파일 단위 핸들러 ----------
+    # GET /files : 데이터 파일 목록과 각 파일 인원수를 응답한다.
     def handle_list_files(self):
         """데이터 파일 목록 + 각 파일의 인원수."""
         names = self.files.list_files()
@@ -369,6 +399,7 @@ class HTTPServer:
         body = "[데이터 파일 목록]\n" + ("\n".join(lines) if lines else "(없음)") + "\n"
         return self.make_response(200, body)
 
+    # POST /files : 새 데이터 파일을 만든다. (CREATE 의 '새 파일로 생성' 갈래)
     def handle_create_file(self, body):
         """새 파일 생성. (CREATE 의 '새 파일로 데이터 생성' 갈래)"""
         name = body.strip()
@@ -381,6 +412,7 @@ class HTTPServer:
             201, f"201 Created: 파일 '{name}{DATA_EXT}' 생성 완료. (이제 이 파일에 POST 로 데이터 추가)\n",
             [f"Location: /files/{name}"])
 
+    # DELETE /files/{f} : 파일을 통째로 삭제한다(기본 파일은 보호). (파일 DELETE)
     def handle_delete_file(self, fname):
         """파일 통째 삭제. (기본 파일 userdata 는 보호)"""
         if fname == DEFAULT_FILE:
@@ -391,6 +423,7 @@ class HTTPServer:
         return self.make_response(404, f"404 Not Found: 파일 '{fname}' 이(가) 없습니다.\n")
 
     # ---------- 레코드 단위 핸들러 (파일 이름을 받아 그 파일을 다룸) ----------
+    # GET : 파일 전체(uid=None) 또는 특정 한 명(uid)을 조회한다. (READ)
     def handle_get(self, fname, uid):
         if not self.files.exists(fname):
             return self.make_response(404, f"404 Not Found: 파일 '{fname}' 이(가) 없습니다.\n")
@@ -406,6 +439,7 @@ class HTTPServer:
             return self.make_response(404, f"404 Not Found: 파일 '{fname}' 에 id={uid} 사용자가 없습니다.\n")
         return self.make_response(200, ",".join(rec[k] for k in FIELDS) + "\n")
 
+    # POST /files/{f} : 선택한 파일에 데이터를 추가한다. (CREATE 의 '기존 파일에 생성' 갈래)
     def handle_post(self, fname, body):
         """선택한 파일에 데이터 추가. (CREATE 의 '기존 파일에 데이터 생성' 갈래)"""
         if not self.files.exists(fname):
@@ -427,6 +461,7 @@ class HTTPServer:
         return self.make_response(201, f"201 Created: 파일 '{fname}' 에 id={uid} 추가 완료.\n",
                                   [f"Location: /files/{fname}/{uid}"])
 
+    # PUT /files/{f}/{id} : 선택한 파일 안 특정 레코드를 수정한다. (UPDATE)
     def handle_put(self, fname, uid, body):
         """선택한 파일 안 특정 레코드 수정. (UPDATE)"""
         if not self.files.exists(fname):
@@ -446,6 +481,7 @@ class HTTPServer:
             return self.make_response(200, f"200 OK: 파일 '{fname}' 의 id={uid} 수정 완료.\n")
         return self.make_response(404, f"404 Not Found: 파일 '{fname}' 에 id={uid} 사용자가 없습니다.\n")
 
+    # DELETE /files/{f}/{id} : 선택한 파일 안 특정 레코드를 삭제한다. (DELETE)
     def handle_delete(self, fname, uid):
         """선택한 파일 안 특정 레코드 삭제. (DELETE 의 '파일 안 데이터 삭제' 갈래)"""
         if not self.files.exists(fname):
@@ -456,6 +492,7 @@ class HTTPServer:
         return self.make_response(404, f"404 Not Found: 파일 '{fname}' 에 id={uid} 사용자가 없습니다.\n")
 
     # ---------- 연결 1건(클라이언트 1명) 처리 — 각 연결이 '별도 스레드'에서 돈다 ----------
+    # 한 클라이언트와의 연결을 유지하며 요청들을 순서대로 처리한다(이 함수 하나가 스레드 1개).
     def handle_client(self, conn, addr):
         tname = threading.current_thread().name           # 이 연결을 맡은 스레드 이름
         client = f"{addr[0]}:{addr[1]}"
@@ -508,6 +545,7 @@ class HTTPServer:
             conn.close()
 
     # ---------- 서버 시작 ----------
+    # 소켓을 열고(bind·listen), 연결마다 스레드를 띄우는 accept 루프를 돈다.
     def start(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
