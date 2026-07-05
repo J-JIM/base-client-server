@@ -742,7 +742,7 @@ quit
 2. 캡처 인터페이스 **loopback**(mac `lo0`).
 3. 필터 **`tcp.port == 8080`** (또는 `http`).
 4. 서버·클라이언트 실행 후 명령을 보내면 패킷이 잡힙니다.
-5. 패킷 우클릭 → **Follow → TCP Stream**으로 요청/응답 전체 대화 확인.
+5. 패킷 우클릭 → **Follow → HTTP Stream**으로 요청/응답 전체 대화 확인.
 
 **한 번 주고받으면 패킷 4개(정상)**: ① HTTP 요청 → ② 서버 TCP ACK → ③ HTTP 응답 → ④ 클라 TCP ACK.
 (연결 시작 시에는 그 앞에 **SYN → SYN-ACK → ACK** 3개가 추가로 보입니다.)
@@ -826,7 +826,7 @@ python3 src/client.py
 2. **오류(상태코드)**: `POST 이름만`→400 · `POST 김,010-1,a@b.com,abcd`→422 · (userdata에서) `POST 또,010-1,x@k.ac.kr,20210001`→409 · `GET 999`→404
 3. **raw 요청(nc)로 505·411** + **chmod로 500** → 상태코드 10종 전부 완성
 4. **동시 접속**: 클라 2개 띄워 서버 로그 `Thread-1`·`Thread-2` 확인
-5. **Wireshark**: `lo0`·`tcp.port==8080` → 요청/응답 Info, 패킷 펼쳐 `IP→TCP→HTTP`, Follow → TCP Stream
+5. **Wireshark**: `lo0`·`tcp.port==8080` → 요청/응답 Info, 패킷 펼쳐 `IP→TCP→HTTP`, Follow → HTTP Stream
 
 ### 주의사항
 - **(가장 중요) 명령어·띄어쓰기는 "영문(한/영) 입력 상태"에서 치기** — 한글 입력기로 치면 스페이스가 **전각 공백**으로 들어가 명령이 안 먹힐 수 있음(`404 빈 경로`). 이름(김주한)만 한글로. *(client가 자동 정규화하도록 보강돼 있지만, 영문 스페이스가 가장 확실)*
@@ -843,8 +843,8 @@ python3 src/client.py
 
 | 항목 | 링크 |
 |------|------|
-|  시연 영상 (YouTube) | [https://www.youtube.com/watch?v=k_cYw6NMXT8](https://www.youtube.com/watch?v=k_cYw6NMXT8) |
-| GitHub 저장소 | [https://github.com/J-JIM/base-client-server ](https://github.com/J-JIM/base-client-server)|
+| 시연 영상 (YouTube) | https://www.youtube.com/watch?v=k_cYw6NMXT8 |
+| GitHub 저장소 | https://github.com/J-JIM/base-client-server |
 
 
 ---
