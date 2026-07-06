@@ -40,6 +40,7 @@ HTTP_VERSION = "HTTP/2.0"
 DEFAULT_FILE = "userdata"        # 시작할 때 선택돼 있는 기본 파일
 
 
+# [함수] 소켓 스트림에서 HTTP 응답 1개(헤더+바디)를 정확히 잘라 읽는다.
 def recv_http_message(sock, buffer):
     """소켓에서 HTTP 응답 1개(헤더+바디)를 읽어 (메시지bytes, 남은buffer) 반환.
     서버가 연결을 닫으면 (None, b'')."""
@@ -68,6 +69,7 @@ def recv_http_message(sock, buffer):
     return header_bytes + b"\r\n\r\n" + body, leftover
 
 
+# [함수] 사용자의 친근한 명령을 HTTP/2.0 요청 문자열로 변환한다.
 def build_request(cmd, current_file):
     """친근한 명령 → HTTP/2.0 요청 문자열로 변환.
     current_file = 현재 선택된 데이터 파일(= GET/POST/PUT/DELETE 의 대상)."""
@@ -106,6 +108,7 @@ def build_request(cmd, current_file):
     )
 
 
+# [함수] 시작할 때와 'help' 입력 시 명령어 안내를 화면에 출력한다.
 def print_help():
     """시작할 때와 'help' 입력 시 보여줄 명령어 안내."""
     print("=" * 64)
@@ -137,6 +140,7 @@ def print_help():
     print("=" * 64)
 
 
+# [함수] 서버에 접속해 지속 연결로 명령을 주고받는 메인 루프(프로그램 시작점).
 def main():
     print_help()
 
